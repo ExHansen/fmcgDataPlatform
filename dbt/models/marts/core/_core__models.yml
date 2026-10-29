@@ -1,0 +1,96 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: 1 baris per hari, 2025-2027. period_4w = kalender retail 13 periode x 4 minggu.
+    columns:
+      - name: date_key
+        description: Kunci tanggal 'YYYYMMDD'.
+        data_tests: [unique, not_null]
+      - name: week_start_date
+        description: Senin awal minggu ISO.
+      - name: period_4w
+        description: Periode retail 4-mingguan, mis. '2026-P03'.
+      - name: event_name
+        description: Nama libur nasional (hanya yang bertanggal tetap).
+
+  - name: dim_product
+    description: SKU (SCD Type 2 dari snapshot material SAP). product_key '-1' = unknown member.
+    columns:
+      - name: product_key
+        description: Surrogate key (hash sku_id + valid_from).
+        data_tests: [unique, not_null]
+      - name: sku_id
+        description: ID produk kanonik = nomor material SAP tanpa leading zero.
+      - name: sap_matnr
+        description: Nomor material SAP asli (18 karakter, dengan leading zero).
+      - name: ean
+        description: Barcode EAN-13.
+      - name: brand
+        description: Brand (teks product hierarchy SAP).
+        data_tests: [not_null]
+      - name: category
+        description: Kategori (teks material group SAP).
+        data_tests: [not_null]
+      - name: pcs_per_case
+        description: Isi per karton (dari konversi satuan SAP MARM).
+      - name: valid_from
+        description: Awal berlaku versi; versi pertama sejak 1900-01-01.
+      - name: valid_to
+        description: Akhir berlaku versi (eksklusif); versi berjalan = 9999-12-31.
+      - name: is_current
+        description: True untuk versi yang berlaku sekarang.
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments: {expression: "valid_from < valid_to"}
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [sku_id, valid_from]}
+
+  - name: dim_customer
+    description: Distributor (sold-to SAP), SCD Type 2. customer_key '-1' = unknown member.
+    columns:
+      - name: customer_key
+        description: Surrogate key (hash customer_id + valid_from).
+        data_tests: [unique, not_null]
+      - name: customer_id
+        description: Nomor customer SAP tanpa leading zero.
+      - name: distributor_code
+        description: Kode distributor di file DMS (DIST_A/B/C).
+      - name: customer_type
+        description: DISTRIBUTOR / KEY_ACCOUNT / UNKNOWN.
+        data_tests:
+          - accepted_values: {arguments: {values: [DISTRIBUTOR, KEY_ACCOUNT, UNKNOWN]}}
+      - name: region
+        description: Wilayah layanan distributor.
+
+  - name: dim_store
+    description: Toko fisik modern trade + distributor pelayannya. store_key '-1' = unknown member.
+    columns:
+      - name: store_key
+        description: Surrogate key (hash store_id).
+        data_tests: [unique, not_null]
+      - name: store_id
+        description: ID toko kanonik = kode toko retailer (berprefix kode retailer).
+      - name: store_format
+        description: MINIMARKET / SUPERMARKET (dari master retailer).
+      - name: distributor_code
+        description: Distributor yang paling banyak mengirim ke toko ini.
+      - name: distributor_key
+        description: FK ke dim_customer (distributor pelayan).
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_customer'), field: customer_key}}
+      - name: region
+        description: Region distributor pelayan.
+
+  - name: dim_promotion
+    description: Promosi terdeteksi dari harga POS (harga minggu ini < 90% harga tertinggi 8 minggu sebelumnya).
+    columns:
+      - name: promotion_key
+        description: Surrogate key; '-1' = tanpa promo.
+        data_tests: [unique, not_null]
+      - name: discount_pct
+        description: Penurunan harga vs harga tertinggi 8 minggu sebelumnya (%).
+      - name: source
+        description: DETECTED (dari harga) / PLANNED (CRM, fase 2) / BOTH / NONE.
+        data_tests:
+          - accepted_values: {arguments: {values: [DETECTED, PLANNED, BOTH, NONE]}}

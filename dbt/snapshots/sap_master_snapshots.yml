@@ -1,0 +1,18 @@
+snapshots:
+  - name: snap_sap_materials
+    description: Riwayat material master (SCD Type 2), mis. material pindah material group.
+    relation: ref('stg_sap__materials')
+    config:
+      unique_key: material_id
+      strategy: check
+      check_cols: [material_group, product_hierarchy, ean, base_uom, is_deletion_flagged]
+      hard_deletes: invalidate
+
+  - name: snap_sap_customers
+    description: Riwayat customer master (SCD Type 2).
+    relation: ref('stg_sap__customers')
+    config:
+      unique_key: customer_id
+      strategy: check
+      check_cols: [customer_name, city, region_code, street, account_group]
+      hard_deletes: invalidate

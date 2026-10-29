@@ -1,0 +1,57 @@
+# Kontrak skema file sumber. `required`: field logis -> nama kolom yang diterima.
+# File tanpa salah satu field wajib -> REJECTED (+ alert). Kolom tak dikenal -> warning saja.
+# Nama kolom asli tetap disimpan apa adanya di payload raw; pemetaan ke nama standar di dbt staging.
+
+dms:
+  DIST_A:
+    source_system: DMS_A
+    format: csv_semicolon
+    filename_pattern: '^secondary_(?P<date>\d{8})\.csv$'
+    required:
+      invoice_no: [No_Faktur]
+      invoice_date: [Tgl_Faktur]
+      outlet_code: [Kode_Outlet]
+      product_code: [Kode_Barang]
+      qty: [Qty]
+      uom: [Satuan]
+      net_value: [Nilai_Netto]
+    optional: [Nama_Outlet, Nama_Barang, Harga, Diskon]
+  DIST_B:
+    source_system: DMS_B
+    format: xlsx
+    filename_pattern: '^secondary_(?P<date>\d{8})(_rev\d+)?\.xlsx$'
+    required:
+      invoice_no: [InvoiceNo]
+      invoice_date: [InvoiceDate]
+      outlet_code: [OutletCode]
+      product_code: [SKU]
+      qty: [Qty]
+      uom: [UOM]
+      net_value: [NetAmount]
+    optional: [OutletName, Description, GrossAmount, DiscountAmount]
+  DIST_C:
+    source_system: DMS_C
+    format: pipe_txt
+    filename_pattern: '^secondary_(?P<date>\d{8})\.txt$'
+    required:
+      invoice_no: [INV_NO]
+      invoice_date: [INV_DATE]
+      # OUTLET_ID / QUANTITY: DIST_C mengganti nama kolom mulai 2026-06-01 (schema drift);
+      # alias ditambahkan setelah alert REJECTED pertama.
+      outlet_code: [CUST_ID, OUTLET_ID]
+      product_code: [ITEM_CODE]
+      qty: [QTY_PCS, QUANTITY]
+      net_value: [NET]
+    optional: [CUST_NAME, OUTLET_NAME, GROSS, DISC]
+
+pos:
+  key_pattern: '^pos/(?P<retailer>[A-Z]{3})/week=(?P<year>\d{4})-(?P<week>\d{2})/[^/]+\.csv$'
+  source_system_prefix: POS_
+  required:
+    store_code: [STORE_CODE]
+    article_code: [ARTICLE_CODE]
+    ean: [EAN]
+    sales_date: [SALES_DATE]
+    qty: [QTY]
+    net_sales: [NET_SALES]
+  optional: [STORE_NAME, DESCRIPTION, GROSS_SALES, DISCOUNT]

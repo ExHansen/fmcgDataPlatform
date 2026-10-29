@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: stg_pos__sellout
+    description: >
+      Sell-out POS retailer, kode toko & artikel versi retailer. Baris dobel dibuang, EAN diperbaiki,
+      retur dan harga outlier ditandai (outlier tidak dibuang di staging; dikarantina di marts).
+    columns:
+      - name: sellout_line_id
+        description: Unik per retailer x toko x artikel x tanggal x (jual/retur).
+        data_tests: [unique, not_null]
+      - name: ean
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true: {arguments: {expression: "~ '^[0-9]{13}$'"}}
+      - name: sales_date
+        data_tests: [not_null]
+      - name: qty
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true: {arguments: {expression: "<> 0"}}
+      - name: is_price_outlier
+        description: Harga satuan > pos_price_outlier_factor x median harga artikel di retailer tsb.

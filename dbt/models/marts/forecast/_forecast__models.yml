@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: mart_forecast_features
+    description: Input forecasting - SKU x region x minggu lengkap (unit, harga, promo, distribusi).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [week_start_date, sku_id, region]}
+
+  - name: fct_forecast
+    description: Forecast mingguan per SKU x region per versi run; actual_units terisi setelah minggu target lewat.
+    columns:
+      - name: forecast_line_id
+        data_tests: [unique, not_null]
+      - name: forecast_units
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0}}
+      - name: product_key
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_product'), field: product_key}}
+      - name: model_role
+        data_tests:
+          - accepted_values: {arguments: {values: [SELECTED, BASELINE]}}
+
+  - name: mart_forecast_accuracy
+    description: Metrik backtest (rolling-origin) per run x model x level.
+    columns:
+      - name: wape
+        data_tests: [not_null]

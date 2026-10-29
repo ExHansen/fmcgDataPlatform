@@ -1,0 +1,70 @@
+# Konfigurasi simulator sistem sumber (MVP: SAP + distributor DMS + POS).
+# Semua angka acak memakai `seed` agar hasil bisa diulang.
+
+seed: 42
+
+dataset:
+  # Paket R `completejourney` (data dunnhumby), diunduh oleh scripts/download_data.py
+  dir: data/external/completejourney
+  departments: [GROCERY, DRUG GM]
+  brand_type: National
+  # 8 manufacturer terbesar di GROCERY + DRUG GM (National brand) = portofolio principal fiktif
+  principal_manufacturers: ["764", "103", "1208", "544", "317", "1251", "194", "1046"]
+  n_stores: 30
+  # Data panel hanya mewakili sebagian pembeli; kuantitas dikali faktor ini
+  panel_projection_factor: 12
+  # Hari terakhir data setelah digeser (harus hari Minggu). Sengaja di masa depan
+  # supaya data terus "bertambah" setiap hari saat `publish` dijalankan.
+  anchor_end_date: "2026-12-27"
+  usd_to_idr: 16000
+
+company:
+  name: PT Nusantara Consumer Goods
+  sap_client: "100"
+  sales_org: "ID01"
+  distribution_channel: "10"
+  division: "00"
+  plant: "ID10"
+  shipping_point: "ID10"
+
+retailers:
+  - { code: MTM, name: Mitra Mart, format: MINIMARKET }
+  - { code: SNT, name: Sentosa Swalayan, format: SUPERMARKET }
+  - { code: LST, name: Lestari Supermarket, format: SUPERMARKET }
+
+distributors:
+  - { code: DIST_A, name: PT Sinar Distribusi Jaya, region: JABODETABEK, cities: [Jakarta, Bekasi, Tangerang, Depok], file_format: csv_semicolon }
+  - { code: DIST_B, name: CV Mega Niaga Parahyangan, region: JAWA BARAT, cities: [Bandung, Cimahi, Bogor], file_format: xlsx }
+  - { code: DIST_C, name: PT Sumber Rejeki Timur, region: JAWA TIMUR, cities: [Surabaya, Sidoarjo, Malang], file_format: pipe_txt }
+
+supply_chain:
+  secondary_delivery_days_per_week: 2      # distributor kirim ke toko 2x seminggu
+  secondary_qty_noise_sd: 0.10
+  distributor_order_weekday: 0             # Senin
+  goods_issue_lead_days: 2                 # order -> goods issue
+  distributor_target_cover_weeks: 2.5
+  principal_price_ratio: 0.62              # harga principal per EA = rasio x harga retail rata-rata
+  distributor_price_ratio: 0.82            # harga distributor ke toko
+  case_sizes: [6, 12, 24]
+
+chaos:
+  sap:
+    order_change_rate: 0.03        # item order diubah qty-nya 1 hari kemudian (AEDAT berubah)
+    reject_item_rate: 0.01         # item ditolak (ABGRU terisi)
+    partial_delivery_rate: 0.08    # LFIMG < KWMENG
+    each_uom_line_rate: 0.05       # item dipesan dalam EA, bukan CS
+    cancel_invoice_rate: 0.04      # invoice dibatalkan (FKSTO='X') lalu ditagih ulang
+    material_reclass_count: 15     # material ganti grup (MATKL) di tengah tahun -> SCD2
+  dms:
+    late_file_prob: 0.10           # file datang 1-3 hari terlambat
+    resend_prob: 0.05              # file dikirim ulang dengan koreksi
+    missing_day_prob: 0.02         # file tidak pernah dikirim
+    carton_uom_rate: 0.30          # baris dilaporkan dalam karton
+    dist_c_column_rename_from: "2026-06-01"
+  pos:
+    duplicate_row_rate: 0.01
+    ean_strip_zero_rate: 0.20      # EAN berawalan 0 kehilangan nol (efek Excel)
+    return_row_rate: 0.005
+    missing_store_week_prob: 0.01
+    price_outlier_rate: 0.001
+    upc_share: 0.30                # porsi produk impor dengan EAN berawalan 0 (UPC-A)

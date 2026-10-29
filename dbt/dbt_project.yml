@@ -1,0 +1,110 @@
+name: fmcg_commercial
+version: "1.0.0"
+config-version: 2
+profile: fmcg_commercial
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+target-path: target
+clean-targets: [target, dbt_packages]
+
+vars:
+  # Pemetaan kolom file distributor: field standar -> kolom asli (alias pertama yang ada dipakai).
+  # Kolom DIST_C berganti nama mulai 2026-06-01 (CUST_ID->OUTLET_ID, QTY_PCS->QUANTITY).
+  dms_sources:
+    DIST_A:
+      number_format: id          # 1.234,50
+      date_format: DD/MM/YYYY
+      columns:
+        invoice_no: [No_Faktur]
+        invoice_date: [Tgl_Faktur]
+        outlet_code: [Kode_Outlet]
+        outlet_name: [Nama_Outlet]
+        product_code: [Kode_Barang]
+        product_name: [Nama_Barang]
+        qty: [Qty]
+        uom: [Satuan]
+        unit_price: [Harga]
+        discount_value: [Diskon]
+        net_value: [Nilai_Netto]
+    DIST_B:
+      number_format: plain
+      date_format: excel_iso     # '2026-03-04 00:00:00'
+      columns:
+        invoice_no: [InvoiceNo]
+        invoice_date: [InvoiceDate]
+        outlet_code: [OutletCode]
+        outlet_name: [OutletName]
+        product_code: [SKU]
+        product_name: [Description]
+        qty: [Qty]
+        uom: [UOM]
+        gross_value: [GrossAmount]
+        discount_value: [DiscountAmount]
+        net_value: [NetAmount]
+    DIST_C:
+      number_format: plain
+      date_format: YYYYMMDD
+      columns:
+        invoice_no: [INV_NO]
+        invoice_date: [INV_DATE]
+        outlet_code: [CUST_ID, OUTLET_ID]
+        outlet_name: [CUST_NAME, OUTLET_NAME]
+        product_code: [ITEM_CODE]
+        qty: [QTY_PCS, QUANTITY]
+        gross_value: [GROSS]
+        discount_value: [DISC]
+        net_value: [NET]
+  uom_map: {PCS: PCS, KRT: CASE, CTN: CASE}
+  # Toleransi harga POS: harga satuan > N x median artikel = outlier
+  pos_price_outlier_factor: 10
+  # Ambang cakupan mapping ID (persen nilai penjualan yang ter-mapping)
+  mapping_coverage_min_pct: 98
+  # Rasio baris file vs median pembanding yang dianggap anomali (persentil 1-99 data: DMS 0,45-2,1; POS 0,67-1,54)
+  volume_anomaly_bounds:
+    DMS: {min_ratio: 0.4, max_ratio: 2.5}
+    POS: {min_ratio: 0.6, max_ratio: 1.6}
+
+models:
+  fmcg_commercial:
+    staging:
+      +schema: staging
+      +materialized: view
+      sap:
+        # Tabel (bukan view): window "versi terbaru" di atas raw mahal bila dihitung ulang di tiap join.
+        +materialized: table
+        +post-hook: "analyze {{ this }}"
+    intermediate:
+      +schema: intermediate
+      +materialized: table
+      +post-hook: "analyze {{ this }}"
+    marts:
+      +schema: marts
+      +materialized: table
+      +post-hook: "analyze {{ this }}"
+    ops:
+      +schema: ops
+      +materialized: table
+
+on-run-start:
+  - "{{ log_run_start() }}"
+on-run-end:
+  - "{{ save_run_results(results) }}"
+
+seeds:
+  fmcg_commercial:
+    +schema: seeds
+    dms_product_mapping:
+      +column_types: {distributor_code: text, local_product_code: text, sap_matnr: text, mapped_by: text, mapped_at: date}
+    distributor_master:
+      +column_types: {distributor_code: text, sap_kunnr: text, source_system: text, distributor_name: text, region: text}
+    id_public_holidays:
+      +column_types: {holiday_date: date, holiday_name: text}
+
+snapshots:
+  fmcg_commercial:
+    +schema: snapshots

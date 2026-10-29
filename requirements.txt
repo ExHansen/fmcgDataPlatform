@@ -1,0 +1,15 @@
+pandas==2.3.3   # statsforecast 2.1.1 mensyaratkan pandas<3
+numpy==2.4.6
+pyarrow==26.0.0
+pyreadr==0.5.7
+PyYAML==6.0.3
+psycopg[binary]==3.3.6
+paramiko==5.1.0
+boto3==1.43.118
+openpyxl==3.1.5
+pytest==9.1.1
+dbt-core==1.11.16
+dbt-postgres==1.11.0
+statsforecast==2.1.1
+mlforecast==1.1.0
+lightgbm==4.7.0

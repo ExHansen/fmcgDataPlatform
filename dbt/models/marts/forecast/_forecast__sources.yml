@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: forecast
+    description: Ditulis oleh forecasting/train_backtest.py (1 run per minggu).
+    tables:
+      - name: forecast_runs
+      - name: forecast_values
+      - name: backtest_metrics
+      - name: backtest_values

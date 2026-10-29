@@ -1,0 +1,4 @@
+retailer_code,retailer_name,store_format,source_system
+MTM,Mitra Mart,MINIMARKET,POS_MTM
+SNT,Sentosa Swalayan,SUPERMARKET,POS_SNT
+LST,Lestari Supermarket,SUPERMARKET,POS_LST

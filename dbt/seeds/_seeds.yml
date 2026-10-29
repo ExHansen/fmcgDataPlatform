@@ -1,0 +1,21 @@
+version: 2
+
+seeds:
+  - name: distributor_master
+    description: Daftar distributor resmi dan nomor customer SAP-nya (dikelola tim sales operations).
+    columns:
+      - name: distributor_code
+        data_tests: [unique, not_null]
+      - name: sap_kunnr
+        data_tests: [unique, not_null]
+
+  - name: dms_product_mapping
+    description: >
+      Mapping manual kode produk lokal distributor -> MATNR SAP, dikelola tim MDM.
+      Dibangun ulang dengan scripts/build_mapping_seed.py (mensimulasikan kerja tim MDM).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [distributor_code, local_product_code]}
+    columns:
+      - name: sap_matnr
+        data_tests: [not_null]

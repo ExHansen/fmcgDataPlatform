@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: unmapped_ids
+    description: ID sumber yang belum punya padanan kanonik (daftar kerja tim MDM), dibangun ulang tiap run.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [entity_type, source_system, source_id]}
+
+  - name: id_mapping_coverage
+    description: Persen nilai penjualan per sumber yang produk/toko/customer-nya sudah ter-mapping.
+    columns:
+      - name: pct_value_mapped
+        data_tests: [not_null]

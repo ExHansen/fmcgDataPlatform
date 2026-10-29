@@ -1,0 +1,137 @@
+version: 2
+
+models:
+  - name: fct_sales
+    description: Sell-out POS, 1 baris = toko x produk x hari. Incremental delete+insert per tanggal, lookback 14 hari.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [date_key, product_key, store_key]}
+    columns:
+      - name: date_key
+        description: Tanggal penjualan (FK dim_date).
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_date'), field: date_key}}
+      - name: product_key
+        description: FK dim_product (versi SCD2 yang berlaku di tanggal penjualan).
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_product'), field: product_key}}
+      - name: store_key
+        description: FK dim_store.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_store'), field: store_key}}
+      - name: promotion_key
+        description: FK dim_promotion; '-1' = tanpa promo.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_promotion'), field: promotion_key}}
+      - name: units_sold
+        description: Unit terjual (tanpa retur). Additive.
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0}}
+      - name: units_returned
+        description: Unit retur (positif). Additive.
+      - name: gross_sales_value
+        description: Nilai penjualan sebelum diskon (IDR).
+      - name: discount_value
+        description: Diskon toko (IDR).
+      - name: net_sales_value
+        description: Nilai penjualan bersih (IDR), tanpa retur.
+      - name: returned_value
+        description: Nilai retur (IDR, positif).
+
+  - name: fct_shipment
+    description: Secondary sales, 1 baris = baris invoice distributor -> toko. Incremental per tanggal invoice.
+    columns:
+      - name: shipment_line_id
+        description: Hash (distributor, no. invoice, kode produk lokal).
+        data_tests: [unique, not_null]
+      - name: product_key
+        description: FK dim_product; '-1' bila kode produk distributor belum ter-mapping.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_product'), field: product_key}}
+      - name: store_key
+        description: FK dim_store.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_store'), field: store_key}}
+      - name: distributor_key
+        description: FK dim_customer (distributor).
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_customer'), field: customer_key}}
+      - name: source_product_code
+        description: Kode produk lokal distributor (sebelum mapping).
+      - name: qty_reported
+        description: Qty seperti di file (bisa karton).
+      - name: uom_reported
+        description: PCS atau CASE.
+      - name: qty_pcs
+        description: Qty dalam PCS (karton dikonversi via MARM); null bila karton & produk belum ter-mapping.
+      - name: net_value
+        description: Nilai bersih invoice (IDR).
+      - name: received_date
+        description: Tanggal file diterima principal (WIB).
+      - name: days_late
+        description: Hari antara tanggal invoice dan file diterima (normal 1 = D+1).
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 7}, config: {severity: warn}}
+      - name: file_version
+        description: Versi file (2+ = kiriman ulang yang menggantikan versi sebelumnya).
+
+  - name: fct_primary_sales
+    description: Sell-in SAP, 1 baris = item sales order + delivery + invoice valid (fill rate = delivered / ordered).
+    columns:
+      - name: order_line_id
+        description: Hash (no. sales order, no. item).
+        data_tests: [unique, not_null]
+      - name: product_key
+        description: FK dim_product.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_product'), field: product_key}}
+      - name: customer_key
+        description: FK dim_customer (distributor sold-to).
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_customer'), field: customer_key}}
+      - name: qty_ordered_pcs
+        description: Qty dipesan (versi terakhir order) dalam PCS.
+      - name: qty_delivered_pcs
+        description: Qty keluar gudang (goods issue) dalam PCS.
+      - name: qty_billed_pcs
+        description: Qty di invoice valid (invoice batal & dokumen S1 tidak dihitung).
+      - name: billed_net_value
+        description: Nilai invoice valid (IDR).
+      - name: delivery_status
+        description: >
+          OPEN (belum goods issue, dikecualikan dari fill rate) / DELIVERED / PARTIAL /
+          NOT_DELIVERED (order dikirim tapi item ini tidak) / REJECTED.
+        data_tests:
+          - accepted_values: {arguments: {values: [OPEN, DELIVERED, PARTIAL, NOT_DELIVERED, REJECTED]}}
+      - name: has_cancelled_invoice
+        description: Pernah ditagih dengan invoice yang kemudian dibatalkan (lalu ditagih ulang).
+      - name: order_to_goods_issue_days
+        description: Lead time order -> barang keluar gudang (hari).
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments: {expression: "qty_delivered_pcs <= qty_ordered_pcs"}
+      - dbt_utils.expression_is_true:
+          name: rejected_items_not_delivered
+          arguments: {expression: "not is_rejected or qty_delivered_pcs = 0"}
+
+  - name: mart_sales_weekly
+    description: Sell-out mingguan per toko x produk dengan atribut dimensi (siap dashboard).
+
+  - name: mart_distributor_scorecard
+    description: Distributor x minggu - sell-in, secondary, sell-out, stok tersirat, weeks of cover, fill rate, kepatuhan file.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [distributor_code, week_start_date]}
+    columns:
+      - name: sell_in_pcs
+        description: PCS keluar gudang principal ke distributor (goods issue SAP) minggu ini.
+      - name: secondary_pcs
+        description: PCS dikirim distributor ke toko minggu ini.
+      - name: sellout_pcs
+        description: PCS terjual di toko yang dilayani distributor minggu ini.
+      - name: implied_stock_pcs
+        description: Kumulatif (sell-in - secondary) sejak awal data; stok awal tidak diketahui.
+      - name: weeks_of_cover
+        description: Stok tersirat / rata-rata secondary 4 minggu terakhir.
+      - name: fill_rate_pct
+        description: Qty terkirim / qty dipesan untuk order minggu ini (order OPEN dikecualikan).

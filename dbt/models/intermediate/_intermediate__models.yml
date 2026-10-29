@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: int_product_xref
+    description: Kode produk tiap sistem -> sku_id kanonik (null = belum ter-mapping). Lihat komentar SQL untuk aturan.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns: {arguments: {combination_of_columns: [source_system, source_id]}}
+    columns:
+      - name: sku_id
+        data_tests:
+          - relationships: {arguments: {to: ref('stg_sap__materials'), field: material_id}}
+      - name: match_method
+        data_tests:
+          - accepted_values: {arguments: {values: [EXACT_KEY, MANUAL, EAN, NORMALIZED_NAME]}}
+
+  - name: int_store_xref
+    data_tests:
+      - dbt_utils.unique_combination_of_columns: {arguments: {combination_of_columns: [source_system, source_id]}}
+
+  - name: int_customer_xref
+    data_tests:
+      - dbt_utils.unique_combination_of_columns: {arguments: {combination_of_columns: [source_system, source_id]}}
+
+  - name: int_id_mapping
+    description: Cross-reference ID antar sistem (PLAN 2.4.4), hanya yang sudah ter-mapping.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [entity_type, source_system, source_id, valid_from]}
+    columns:
+      - name: canonical_id
+        data_tests: [not_null]
+      - name: match_confidence
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 1}}
+
+  - name: int_secondary_sales_mapped
+    columns:
+      - name: shipment_line_id
+        data_tests: [unique, not_null]
+      - name: qty_pcs
+        description: Null hanya jika satuan CASE dan produk belum ter-mapping (faktor karton tidak diketahui).
+        data_tests:
+          - not_null:
+              config: {where: "sku_id is not null"}
+      - name: distributor_customer_id
+        data_tests: [not_null]
+
+  - name: int_sellout_mapped
+    columns:
+      - name: sellout_line_id
+        data_tests: [unique, not_null]
+      - name: store_id
+        data_tests: [not_null]

@@ -1,0 +1,52 @@
+version: 2
+
+sources:
+  - name: raw_sap
+    description: Ekstrak SAP SD (append-only, 1 baris per versi data sumber).
+    loaded_at_field: _ingested_at
+    config:
+      freshness:
+        warn_after: {count: 26, period: hour}
+        error_after: {count: 48, period: hour}
+    tables:
+      - name: kna1
+      - name: knvv
+      - name: mara
+      - name: makt
+      - name: marm
+      - name: t023t
+      - name: t179t
+      - name: vbak
+      - name: vbap
+      - name: vbep
+      - name: likp
+      - name: lips
+      - name: vbrk
+      - name: vbrp
+      - name: vbfa
+
+  - name: raw_dms
+    description: File secondary sales distributor (payload jsonb dengan nama kolom asli).
+    loaded_at_field: _ingested_at
+    config:
+      freshness:
+        warn_after: {count: 2, period: day}
+        error_after: {count: 4, period: day}
+    tables:
+      - name: secondary_sales
+
+  - name: raw_pos
+    description: File sell-out POS mingguan dari retailer.
+    loaded_at_field: _ingested_at
+    config:
+      freshness:
+        warn_after: {count: 8, period: day}
+        error_after: {count: 15, period: day}
+    tables:
+      - name: sellout
+
+  - name: ops
+    description: Tabel operasional yang diisi ingestion.
+    tables:
+      - name: file_manifest
+      - name: pipeline_run_log

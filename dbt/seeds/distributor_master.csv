@@ -1,0 +1,4 @@
+distributor_code,sap_kunnr,source_system,distributor_name,region
+DIST_A,0000200001,DMS_A,PT Sinar Distribusi Jaya,JABODETABEK
+DIST_B,0000200002,DMS_B,CV Mega Niaga Parahyangan,JAWA BARAT
+DIST_C,0000200003,DMS_C,PT Sumber Rejeki Timur,JAWA TIMUR

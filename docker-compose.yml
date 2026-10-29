@@ -1,0 +1,223 @@
+name: fmcg
+
+# Konfigurasi bersama service Airflow (Airflow 3, LocalExecutor). Metadata Airflow disimpan di
+# database `airflow` pada server Postgres `dwh` (hemat memori; dipisah per database).
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: orchestration/airflow/Dockerfile
+  image: fmcg-airflow:3.3.2
+  env_file: .env
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${DWH_DB_USER}:${DWH_DB_PASSWORD}@dwh:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/project/orchestration/airflow/dags
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Jakarta
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    # Lokal saja (port diikat ke 127.0.0.1): semua pengguna dianggap admin, tanpa login.
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
+    # Kode project: host/port versi jaringan docker (menimpa nilai localhost di .env)
+    PROJECT_DIR: /opt/project
+    PROJECT_PYTHON: /opt/airflow/project-venv/bin/python
+    SAP_DB_HOST: sap-db
+    SAP_DB_PORT: "5432"
+    DWH_DB_HOST: dwh
+    DWH_DB_PORT: "5432"
+    SFTP_HOST: sftp
+    SFTP_PORT: "22"
+    S3_ENDPOINT_URL: http://lake:8333
+    DBT_TARGET_PATH: /tmp/dbt-target
+    DBT_LOG_PATH: /tmp/dbt-logs
+  volumes:
+    - .:/opt/project
+    - airflow_logs:/opt/airflow/logs
+  depends_on: &airflow-depends
+    airflow-init:
+      condition: service_completed_successfully
+
+services:
+  # ---------- Sistem sumber (simulator) ----------
+  sap-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${SAP_DB_NAME}
+      POSTGRES_USER: ${SAP_DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${SAP_DB_ADMIN_PASSWORD}
+      SAP_DB_READER_USER: ${SAP_DB_READER_USER}
+      SAP_DB_READER_PASSWORD: ${SAP_DB_READER_PASSWORD}
+    ports: ["127.0.0.1:${SAP_DB_PORT}:5432"]
+    volumes:
+      - sap_db_data:/var/lib/postgresql/data
+      - ./simulators/sap_mock/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+    mem_limit: 512m
+
+  # Folder per distributor di volume `dms_inbox` harus ada sebelum sftp memasang subpath.
+  sftp-init:
+    image: alpine:3.20
+    command: >
+      sh -c "mkdir -p /v/DIST_A /v/DIST_B /v/DIST_C &&
+             chown 1001:100 /v/DIST_A && chown 1002:100 /v/DIST_B && chown 1003:100 /v/DIST_C &&
+             chmod 2775 /v/DIST_A /v/DIST_B /v/DIST_C"
+    volumes:
+      - dms_inbox:/v
+
+  sftp:
+    image: atmoz/sftp:alpine
+    depends_on:
+      sftp-init:
+        condition: service_completed_successfully
+    # user:password:uid:gid  — tiap distributor hanya melihat folder `upload` miliknya;
+    # user `ingest` (milik principal) melihat semua lewat /inbox.
+    command:
+      - dist_a:${DIST_A_PASSWORD}:1001:100
+      - dist_b:${DIST_B_PASSWORD}:1002:100
+      - dist_c:${DIST_C_PASSWORD}:1003:100
+      - ingest:${SFTP_INGEST_PASSWORD}:1100:100
+    ports: ["127.0.0.1:${SFTP_PORT}:22"]
+    volumes:
+      - { type: volume, source: dms_inbox, target: /home/dist_a/upload, volume: { subpath: DIST_A } }
+      - { type: volume, source: dms_inbox, target: /home/dist_b/upload, volume: { subpath: DIST_B } }
+      - { type: volume, source: dms_inbox, target: /home/dist_c/upload, volume: { subpath: DIST_C } }
+      - { type: volume, source: dms_inbox, target: /home/ingest/inbox, read_only: true }
+      - sftp_host_keys:/etc/ssh/keys
+    entrypoint:
+      - sh
+      - -c
+      # Simpan host key di volume agar fingerprint tetap sama setelah restart.
+      - |
+        for t in ed25519 rsa; do
+          [ -f /etc/ssh/keys/ssh_host_$${t}_key ] || ssh-keygen -t $$t -f /etc/ssh/keys/ssh_host_$${t}_key -N '' >/dev/null
+          cp /etc/ssh/keys/ssh_host_$${t}_key* /etc/ssh/
+        done
+        exec /entrypoint "$$@"
+      - sftp-entry
+    mem_limit: 128m
+
+  # Data lake + bucket tempat retailer menaruh file POS (S3-compatible)
+  lake:
+    image: chrislusf/seaweedfs:4.48
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        printf '{"identities":[{"name":"admin","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' \
+          "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" > /tmp/s3.json
+        exec /entrypoint.sh server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json \
+          -master.volumeSizeLimitMB=256 -volume.max=100
+    ports: ["127.0.0.1:8333:8333"]
+    volumes:
+      - lake_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status || exit 1"]
+      interval: 5s
+      retries: 30
+    mem_limit: 768m
+
+  # ---------- Warehouse ----------
+  dwh:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DWH_DB_NAME}
+      POSTGRES_USER: ${DWH_DB_USER}
+      POSTGRES_PASSWORD: ${DWH_DB_PASSWORD}
+    ports: ["127.0.0.1:${DWH_DB_PORT}:5432"]
+    volumes:
+      - dwh_data:/var/lib/postgresql/data
+    # Schema dibuat oleh `python -m ingestion migrate` (warehouse/migrations/*.sql)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+    mem_limit: 1g
+
+  # ---------- Orkestrasi (Airflow 3) & database aplikasi ----------
+  # Database aplikasi Airflow & Metabase di server Postgres `dwh` (dibuat bila belum ada; idempotent)
+  app-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      dwh:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${DWH_DB_PASSWORD}
+    command:
+      - sh
+      - -c
+      - >-
+        for db in airflow metabase; do
+        psql -h dwh -U "${DWH_DB_USER}" -d "${DWH_DB_NAME}" -tAc "select 1 from pg_database where datname = '$$db'" | grep -q 1 ||
+        psql -h dwh -U "${DWH_DB_USER}" -d "${DWH_DB_NAME}" -c "create database $$db" || exit 1;
+        done
+
+  airflow-init:
+    <<: *airflow-common
+    depends_on:
+      app-db-init:
+        condition: service_completed_successfully
+    command: bash -c "airflow db migrate && airflow pools set dbt 1 'dbt build berjalan bergiliran'"
+    mem_limit: 1g
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/api/v2/version"]
+      interval: 15s
+      retries: 20
+    mem_limit: 1g
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    # Task (ingestion, dbt) berjalan sebagai subprocess scheduler (LocalExecutor)
+    mem_limit: 2g
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    mem_limit: 768m
+
+  # ---------- BI ----------
+  metabase:
+    image: metabase/metabase:v0.63.19
+    depends_on:
+      app-db-init:
+        condition: service_completed_successfully
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: dwh
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: ${DWH_DB_USER}
+      MB_DB_PASS: ${DWH_DB_PASSWORD}
+      MB_SITE_LOCALE: id
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      JAVA_TIMEZONE: Asia/Jakarta
+      JAVA_OPTS: -Xmx768m
+    ports: ["127.0.0.1:3000:3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      retries: 40
+    mem_limit: 1280m
+
+volumes:
+  airflow_logs:
+  sap_db_data:
+  dms_inbox:
+  sftp_host_keys:
+  lake_data:
+  dwh_data:

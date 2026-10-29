@@ -1,0 +1,137 @@
+version: 2
+
+models:
+  - name: stg_sap__sales_orders
+    config:
+      indexes: [{columns: [sales_order_no], unique: true}]
+    description: Header sales order (VBAK), versi terbaru. Tanggal DATS -> date, leading zero customer dihapus.
+    columns:
+      - name: sales_order_no
+        data_tests: [unique, not_null]
+      - name: sold_to_id
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('stg_sap__customers'), field: customer_id}}
+      - name: order_date
+        data_tests: [not_null]
+
+  - name: stg_sap__sales_order_items
+    config:
+      indexes: [{columns: [sales_order_no, item_no], unique: true}, {columns: [material_id]}]
+    description: Item sales order (VBAP). qty_base_uom = qty dalam satuan dasar (EA) memakai faktor UMVKZ/UMVKN.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns: {arguments: {combination_of_columns: [sales_order_no, item_no]}}
+    columns:
+      - name: sales_order_no
+        data_tests:
+          - relationships: {arguments: {to: ref('stg_sap__sales_orders'), field: sales_order_no}}
+      - name: material_id
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('stg_sap__materials'), field: material_id}}
+      - name: sales_uom
+        data_tests:
+          - accepted_values: {arguments: {values: [CS, EA]}}
+      - name: qty_base_uom
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0}}
+
+  - name: stg_sap__schedule_lines
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [sales_order_no, item_no, schedule_line_no]}
+
+  - name: stg_sap__deliveries
+    config:
+      indexes: [{columns: [delivery_no], unique: true}]
+    description: Header outbound delivery (LIKP). actual_goods_issue_date terisi setelah barang keluar gudang.
+    columns:
+      - name: delivery_no
+        data_tests: [unique, not_null]
+
+  - name: stg_sap__delivery_items
+    config:
+      indexes: [{columns: [delivery_no, item_no], unique: true}, {columns: [sales_order_no, sales_order_item_no]}]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns: {arguments: {combination_of_columns: [delivery_no, item_no]}}
+    columns:
+      - name: delivery_no
+        data_tests:
+          - relationships: {arguments: {to: ref('stg_sap__deliveries'), field: delivery_no}}
+
+  - name: stg_sap__billing_documents
+    config:
+      indexes: [{columns: [billing_no], unique: true}]
+    description: >
+      Header billing (VBRK). Invoice yang dibatalkan punya is_cancelled = true dan dokumen pembatalan
+      (S1) dengan cancelled_billing_no menunjuk invoice asal.
+    columns:
+      - name: billing_no
+        data_tests: [unique, not_null]
+      - name: billing_type
+        data_tests:
+          - accepted_values: {arguments: {values: [F2, S1]}}
+      - name: cancelled_billing_no
+        data_tests:
+          - relationships: {arguments: {to: ref('stg_sap__billing_documents'), field: billing_no}}
+
+  - name: stg_sap__billing_items
+    config:
+      indexes: [{columns: [billing_no, item_no], unique: true}, {columns: [sales_order_no, sales_order_item_no]}]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns: {arguments: {combination_of_columns: [billing_no, item_no]}}
+    columns:
+      - name: billing_no
+        data_tests:
+          - relationships: {arguments: {to: ref('stg_sap__billing_documents'), field: billing_no}}
+
+  - name: stg_sap__document_flow
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [preceding_doc_no, preceding_item_no, subsequent_doc_no, subsequent_item_no]}
+
+  - name: stg_sap__customers
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+
+  - name: stg_sap__customer_sales_areas
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [customer_id, sales_org, distribution_channel, division]}
+
+  - name: stg_sap__materials
+    config:
+      indexes: [{columns: [material_id], unique: true}, {columns: [ean]}]
+    description: Material master (MARA). EAN dipad ke 13 digit.
+    columns:
+      - name: material_id
+        data_tests: [unique, not_null]
+      - name: ean
+        data_tests: [unique]
+      - name: material_group
+        data_tests:
+          - relationships: {arguments: {to: ref('stg_sap__material_groups'), field: material_group}}
+
+  - name: stg_sap__material_texts
+    columns:
+      - name: material_id
+        data_tests: [unique, not_null]
+
+  - name: stg_sap__uom_conversions
+    data_tests:
+      - dbt_utils.unique_combination_of_columns: {arguments: {combination_of_columns: [material_id, alt_uom]}}
+    columns:
+      - name: base_uom_per_alt_uom
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 1}}
+
+  - name: stg_sap__material_groups
+    columns:
+      - name: material_group
+        data_tests: [unique, not_null]
+
+  - name: stg_sap__product_hierarchies
+    columns:
+      - name: product_hierarchy
+        data_tests: [unique, not_null]
